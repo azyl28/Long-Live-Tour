@@ -1,142 +1,123 @@
--- =========================================
--- ZAKTUALIZOWANY SCHEMAT BAZY DANYCH
--- =========================================
+-- =================================================================
+-- Schema for the Fleet Management System
+-- Version 2.0
+--
+-- This schema enforces strict data continuity and state management.
+-- =================================================================
 
--- Tabela pracowników (bez zmian)
--- =========================================
-CREATE TABLE IF NOT EXISTS employees (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    first_name TEXT NOT NULL,
-    last_name TEXT NOT NULL,
-    position TEXT,
-    department TEXT, -- dział / komórka
-    permissions TEXT DEFAULT 'employee',
-    email TEXT,
-    phone TEXT,
-    is_active INTEGER DEFAULT 1,
-    notes TEXT,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
--- =========================================
--- Tabela pojazdów - DODANE current_fuel
--- =========================================
+-- =================================================================
+-- VEHICLES TABLE
+-- Central point of reference for all vehicle data.
+-- This table holds the CURRENT state of the vehicle.
+-- =================================================================
 CREATE TABLE IF NOT EXISTS vehicles (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     registration_number TEXT NOT NULL UNIQUE,
     brand TEXT NOT NULL,
     model TEXT NOT NULL,
+    vin TEXT UNIQUE,
+    production_year INTEGER,
     fuel_type TEXT NOT NULL,
-    fuel_consumption REAL NOT NULL DEFAULT 7.5, -- l/100km (średnie spalanie katalogowe)
-    current_mileage REAL DEFAULT 0,
-    current_fuel REAL DEFAULT 50, -- AKUALNY STAN PALIWA (NOWE POLE)
-    status TEXT DEFAULT 'available', -- available, inuse, service, broken
     tank_capacity REAL,
-    vin TEXT, -- numer VIN
-    production_year INTEGER, -- rok produkcji
-    notes TEXT, -- uwagi o pojeździe
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    
-    FOREIGN KEY (id) REFERENCES key_log(vehicle_id) ON DELETE CASCADE
+    -- Normative fuel consumption (l/100km)
+    normative_consumption REAL NOT NULL,
+    -- The single source of truth for the vehicle's current state
+    current_mileage REAL NOT NULL DEFAULT 0,
+    current_fuel REAL NOT NULL DEFAULT 0,
+    -- available, in_trip, maintenance
+    status TEXT NOT NULL DEFAULT 'available',
+    last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- =========================================
--- Tabela dziennika kluczy (bez zmian)
--- =========================================
-CREATE TABLE IF NOT EXISTS key_log (
+-- =================================================================
+-- DRIVERS TABLE
+-- Manages driver information and qualifications.
+-- =================================================================
+CREATE TABLE IF NOT EXISTS drivers (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    vehicle_id INTEGER NOT NULL, -- pojazd
-    employee_id INTEGER NOT NULL, -- kto bierze klucz
-    checkout_time TIMESTAMP NOT NULL, -- data/godzina wydania
-    return_time TIMESTAMP, -- data/godzina zwrotu (NULL = jeszcze w trasie)
-    checkout_mileage REAL, -- przebieg przy wydaniu
-    return_mileage REAL, -- przebieg przy zwrocie
-    checkout_fuel REAL, -- paliwo przy wydaniu (L)
-    return_fuel REAL, -- paliwo przy zwrocie
-    storage_location TEXT, -- gdzie są klucze (np. Szafka A3)
-    status TEXT DEFAULT 'out', -- out / returned
-    notes TEXT,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    
-    FOREIGN KEY (vehicle_id) REFERENCES vehicles(id) ON DELETE CASCADE,
-    FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE
+    first_name TEXT NOT NULL,
+    last_name TEXT NOT NULL,
+    license_number TEXT NOT NULL UNIQUE,
+    license_category TEXT NOT NULL,
+    license_expiry DATE NOT NULL,
+    phone_number TEXT,
+    -- active, inactive
+    status TEXT NOT NULL DEFAULT 'active'
 );
 
--- Indeksy dla key_log
-CREATE INDEX IF NOT EXISTS idx_keylog_vehicle ON key_log(vehicle_id);
-CREATE INDEX IF NOT EXISTS idx_keylog_employee ON key_log(employee_id);
-CREATE INDEX IF NOT EXISTS idx_keylog_status ON key_log(status);
+-- =================================================================
+-- KEYS TABLE
+-- Manages the physical access to vehicles.
+-- A key checkout is required to start a trip.
+-- =================================================================
+CREATE TABLE IF NOT EXISTS keys (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    vehicle_id INTEGER NOT NULL UNIQUE,
+    -- issued, returned
+    status TEXT NOT NULL DEFAULT 'returned',
+    current_driver_id INTEGER,
+    checkout_time TIMESTAMP,
+    issuer_name TEXT,
+    return_time TIMESTAMP,
+    returner_name TEXT,
+    notes TEXT,
+    FOREIGN KEY (vehicle_id) REFERENCES vehicles(id) ON DELETE CASCADE,
+    FOREIGN KEY (current_driver_id) REFERENCES drivers(id) ON DELETE SET NULL
+);
 
--- =========================================
--- Tabela przejazdów - UZUPEŁNIONE fuel_used, calculated_consumption
--- =========================================
+-- =================================================================
+-- TRIPS TABLE (ROAD CARD)
+-- Records every trip, inheriting the vehicle's state upon start.
+-- =================================================================
 CREATE TABLE IF NOT EXISTS trips (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    -- Podstawowe informacje
-    trip_number TEXT UNIQUE, -- Numer karty drogowej (opcjonalnie)
+    road_card_number TEXT UNIQUE,
     vehicle_id INTEGER NOT NULL,
-    employee_id INTEGER NOT NULL,
-    key_log_id INTEGER, -- wpis w key_log, z którego startuje przejazd
-    
-    -- Daty i miejsca
-    start_date TIMESTAMP NOT NULL,
-    end_date TIMESTAMP,
-    start_location TEXT,
-    end_location TEXT,
-    destination TEXT, -- Cel podróży
-    purpose TEXT, -- Opis / cel służbowy
-    ordered_by TEXT, -- Kto zlecił wyjazd
-    
-    -- Przebieg
-    start_mileage REAL,
+    driver_id INTEGER NOT NULL,
+    start_time TIMESTAMP NOT NULL,
+    -- Inherited from vehicles table at the moment of trip creation
+    start_mileage REAL NOT NULL,
+    start_fuel REAL NOT NULL,
+    end_time TIMESTAMP,
     end_mileage REAL,
-    distance REAL, -- Dystans tego przejazdu (km)
-    
-    -- Paliwo - ROZSZERZONE
-    start_fuel REAL, -- Stan paliwa na wyjeździe (L)
-    end_fuel REAL, -- Stan paliwa po powrocie (L)
-    fuel_used REAL, -- Rzeczywiste zużyte paliwo (L)
-    calculated_fuel REAL, -- PRZELICZONE zużycie wg średniego spalania (L)
-    
-    fuel_cost REAL, -- Koszt paliwa
-    fuel_type TEXT, -- Rodzaj paliwa
-    avg_consumption REAL, -- Średnie spalanie z vehicles (L/100km)
-    
-    -- Status i uwagi
-    status TEXT DEFAULT 'active', -- active / completed / cancelled
-    vehicle_ok INTEGER DEFAULT 1, -- Czy pojazd sprawny (checkbox)
+    end_fuel REAL,
+    route TEXT NOT NULL,
+    purpose TEXT,
+    -- calculated fields upon trip completion
+    distance REAL,
+    fuel_consumed_calculated REAL,
+    -- active, completed, cancelled
+    status TEXT NOT NULL DEFAULT 'active',
     notes TEXT,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    
-    -- Klucze obce
     FOREIGN KEY (vehicle_id) REFERENCES vehicles(id) ON DELETE CASCADE,
-    FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE,
-    FOREIGN KEY (key_log_id) REFERENCES key_log(id) ON DELETE SET NULL
+    FOREIGN KEY (driver_id) REFERENCES drivers(id) ON DELETE CASCADE
 );
 
--- Indeksy dla trips
-CREATE INDEX IF NOT EXISTS idx_trips_dates ON trips(start_date, end_date);
+-- =================================================================
+-- FUELING LOGS TABLE
+-- The only way to increase a vehicle's fuel level.
+-- =================================================================
+CREATE TABLE IF NOT EXISTS fueling_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    vehicle_id INTEGER NOT NULL,
+    trip_id INTEGER, -- Optional, if fueling happened during a trip
+    fueling_time TIMESTAMP NOT NULL,
+    mileage_at_fueling REAL NOT NULL,
+    liters_added REAL NOT NULL,
+    price_per_liter REAL,
+    total_cost REAL,
+    notes TEXT,
+    FOREIGN KEY (vehicle_id) REFERENCES vehicles(id) ON DELETE CASCADE,
+    FOREIGN KEY (trip_id) REFERENCES trips(id) ON DELETE SET NULL
+);
+
+-- =================================================================
+-- INDEXES FOR PERFORMANCE
+-- =================================================================
+CREATE INDEX IF NOT EXISTS idx_vehicles_status ON vehicles(status);
+CREATE INDEX IF NOT EXISTS idx_drivers_status ON drivers(status);
+CREATE INDEX IF NOT EXISTS idx_keys_status ON keys(status);
+CREATE INDEX IF NOT EXISTS idx_trips_vehicle_id ON trips(vehicle_id);
+CREATE INDEX IF NOT EXISTS idx_trips_driver_id ON trips(driver_id);
 CREATE INDEX IF NOT EXISTS idx_trips_status ON trips(status);
-CREATE INDEX IF NOT EXISTS idx_trips_vehicle ON trips(vehicle_id);
-CREATE INDEX IF NOT EXISTS idx_trips_employee ON trips(employee_id);
-CREATE INDEX IF NOT EXISTS idx_trips_number ON trips(trip_number);
-
--- =========================================
--- SKRYPTY MIGRACJI - DODAJE NOWE KOLUMNY
--- =========================================
--- DODAJ current_fuel DO vehicles (jeśli nie istnieje)
-ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS current_fuel REAL DEFAULT 50;
-
--- DODAJ calculated_fuel DO trips (jeśli nie istnieje)
-ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS fuel_consumption REAL DEFAULT 7.5;
-
--- Ustaw domyślne wartości dla istniejących pojazdów
-UPDATE vehicles SET current_fuel = 50 WHERE current_fuel IS NULL;
-UPDATE vehicles SET fuel_consumption = 7.5 WHERE fuel_consumption IS NULL;
-
--- =========================================
--- WYŚWIETL STRUKTURĘ PO ZMIANACH
--- =========================================
--- .schema vehicles
--- .schema trips
--- .schema key_log
+CREATE INDEX IF NOT EXISTS idx_fueling_logs_vehicle_id ON fueling_logs(vehicle_id);
