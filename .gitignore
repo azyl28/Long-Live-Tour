@@ -1,0 +1,18 @@
+# Pliki generowane przez Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Pliki środowiska wirtualnego
+venv/
+env/
+.env
+
+# Pliki bazy danych
+data/fleet.db
+
+# Pliki generowane przez PyInstaller
+build/
+dist/
+*.spec
