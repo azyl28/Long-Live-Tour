@@ -1,0 +1,36 @@
+app:
+  name: "System Ewidencji Pojazdów"
+  version: "1.0.0"
+  company: "Twoja Firma Sp. z o.o."
+  language: "pl"
+
+database:
+  path: "database/fleet.db"
+  backup_path: "backup/"
+  backup_interval_hours: 24
+  max_backup_files: 30
+
+pdf:
+  template_path: "src/templates/"
+  output_path: "reports/pdf/"
+  default_font: "Helvetica"
+  font_size: 10
+  include_qr_code: true
+
+business_rules:
+  require_signature: true
+  allow_mileage_correction: false
+  require_damage_check: true
+  auto_generate_trip_sheet: true
+  min_trip_distance: 0.1
+
+ui:
+  theme: "light"
+  font_size: 12
+  date_format: "dd.MM.yyyy"
+  time_format: "HH:mm"
+
+reports:
+  save_location: "reports/"
+  archive_after_days: 90
+  formats: ["pdf", "csv"]
